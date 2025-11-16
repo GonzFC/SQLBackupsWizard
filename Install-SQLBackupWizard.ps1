@@ -463,30 +463,59 @@ WITH
     # Execute backup
     $startTime = Get-Date
     Write-BackupLog "Starting backup..." "INFO"
-    
-    Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $backupQuery -TrustServerCertificate -QueryTimeout 3600 -Verbose 4>&1 | 
-        ForEach-Object { Write-BackupLog $_.Message "INFO" }
-    
+    Write-BackupLog "Backup command: BACKUP DATABASE [$DatabaseName] TO DISK = N'$backupFile'" "INFO"
+
+    try {
+        # Execute backup with proper error handling
+        $backupResult = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $backupQuery -TrustServerCertificate -QueryTimeout 3600 -Verbose -ErrorAction Stop 4>&1
+
+        # Log verbose output
+        foreach ($msg in $backupResult) {
+            if ($msg -is [System.Management.Automation.VerboseRecord]) {
+                Write-BackupLog $msg.Message "INFO"
+            }
+        }
+    }
+    catch {
+        Write-BackupLog "Backup command failed!" "ERROR"
+        Write-BackupLog "Error: $($_.Exception.Message)" "ERROR"
+        if ($_.Exception.InnerException) {
+            Write-BackupLog "Inner Error: $($_.Exception.InnerException.Message)" "ERROR"
+        }
+        exit 1
+    }
+
     $endTime = Get-Date
     $duration = ($endTime - $startTime).TotalSeconds
-    
+
+    # Wait a moment for file system to sync
+    Start-Sleep -Milliseconds 500
+
     # Get file size
     if (Test-Path $backupFile) {
         $fileSize = (Get-Item $backupFile).Length / 1MB
         Write-BackupLog "Backup completed successfully!" "SUCCESS"
         Write-BackupLog "Duration: $([math]::Round($duration, 2)) seconds" "INFO"
         Write-BackupLog "File size: $([math]::Round($fileSize, 2)) MB" "INFO"
-        
+
         # Verify backup
         Write-BackupLog "Verifying backup integrity..." "INFO"
-        $verifyQuery = "RESTORE VERIFYONLY FROM DISK = N'$backupFile' WITH CHECKSUM"
-        Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $verifyQuery -TrustServerCertificate -QueryTimeout 600
-        Write-BackupLog "Backup verification passed!" "SUCCESS"
-        
+        try {
+            $verifyQuery = "RESTORE VERIFYONLY FROM DISK = N'$backupFile' WITH CHECKSUM"
+            Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $verifyQuery -TrustServerCertificate -QueryTimeout 600 -ErrorAction Stop
+            Write-BackupLog "Backup verification passed!" "SUCCESS"
+        }
+        catch {
+            Write-BackupLog "Backup verification failed!" "WARNING"
+            Write-BackupLog "Error: $($_.Exception.Message)" "WARNING"
+        }
+
         exit 0
     }
     else {
         Write-BackupLog "Backup file not found after backup operation!" "ERROR"
+        Write-BackupLog "Expected path: $backupFile" "ERROR"
+        Write-BackupLog "Please check SQL Server error logs for details" "ERROR"
         exit 1
     }
 }
