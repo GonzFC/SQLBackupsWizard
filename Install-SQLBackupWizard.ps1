@@ -255,6 +255,124 @@ function Invoke-HealthCheck {
     }
 }
 
+function Get-ServiceCredentials {
+    Write-Header "SERVICE ACCOUNT CREDENTIALS"
+    Write-Host ""
+    Write-Info "Scheduled tasks need to run with a domain account that has:"
+    Write-Host "  - SQL Server admin/backup permissions"
+    Write-Host "  - Access to backup file locations"
+    Write-Host "  - 'Log on as a batch job' rights (auto-granted by Task Scheduler)"
+    Write-Host ""
+    Write-Warning "Do NOT use your personal account - use a dedicated service account!"
+    Write-Host ""
+
+    $maxAttempts = 3
+    $attempt = 0
+
+    while ($attempt -lt $maxAttempts) {
+        $attempt++
+
+        Write-Info "Enter domain credentials (e.g., DOMAIN\serviceaccount or serviceaccount@domain.com)"
+        $credential = Get-Credential -Message "Enter credentials for scheduled tasks"
+
+        if (-not $credential) {
+            Write-Warning "Credentials are required to create scheduled tasks"
+            if ($attempt -lt $maxAttempts) {
+                Write-Info "Please try again ($attempt/$maxAttempts)"
+                continue
+            } else {
+                Write-Error "Failed to obtain credentials after $maxAttempts attempts"
+                return $null
+            }
+        }
+
+        # Extract username
+        $username = $credential.UserName
+        Write-Info "Provided username: $username"
+
+        # Validate username format (should contain domain)
+        if ($username -notmatch '\\|@') {
+            Write-Warning "Username should include domain (e.g., DOMAIN\user or user@domain.com)"
+            if ($attempt -lt $maxAttempts) {
+                Write-Info "Please try again ($attempt/$maxAttempts)"
+                continue
+            }
+        }
+
+        return $credential
+    }
+
+    return $null
+}
+
+function Test-SQLCredentials {
+    param(
+        [Parameter(Mandatory=$true)]
+        [System.Management.Automation.PSCredential]$Credential,
+
+        [Parameter(Mandatory=$true)]
+        [string]$ServerInstance
+    )
+
+    Write-Info "Validating credentials can access SQL Server..."
+
+    try {
+        # Convert SecureString password to plain text for SQL connection
+        $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Credential.Password)
+        $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
+
+        # Build connection string
+        $connectionString = "Server=$ServerInstance;Integrated Security=false;User ID=$($Credential.UserName);Password=$plainPassword;TrustServerCertificate=true;Encrypt=true;"
+
+        # Test connection
+        $connection = New-Object System.Data.SqlClient.SqlConnection
+        $connection.ConnectionString = $connectionString
+        $connection.Open()
+
+        # Test if user has backup permissions
+        $command = $connection.CreateCommand()
+        $command.CommandText = "SELECT IS_SRVROLEMEMBER('sysadmin') AS IsSysAdmin, IS_SRVROLEMEMBER('dbcreator') AS IsDbCreator"
+        $reader = $command.ExecuteReader()
+
+        $hasSysAdmin = $false
+        $hasDbCreator = $false
+
+        if ($reader.Read()) {
+            $hasSysAdmin = $reader["IsSysAdmin"] -eq 1
+            $hasDbCreator = $reader["IsDbCreator"] -eq 1
+        }
+
+        $reader.Close()
+        $connection.Close()
+
+        # Clear password from memory
+        $plainPassword = $null
+
+        if ($hasSysAdmin) {
+            Write-Success "Credentials validated - user has sysadmin role"
+            return $true
+        } elseif ($hasDbCreator) {
+            Write-Success "Credentials validated - user has dbcreator role"
+            Write-Warning "User has dbcreator but not sysadmin - backups should work but verify permissions"
+            return $true
+        } else {
+            Write-Error "User lacks sufficient permissions (needs sysadmin or dbcreator role)"
+            Write-Info "Current roles: sysadmin=$hasSysAdmin, dbcreator=$hasDbCreator"
+            return $false
+        }
+    }
+    catch {
+        Write-Error "Failed to validate credentials: $($_.Exception.Message)"
+        Write-Info "Please verify:"
+        Write-Host "  - Username and password are correct"
+        Write-Host "  - Account has SQL Server login"
+        Write-Host "  - SQL Server allows SQL authentication or Windows authentication"
+        Write-Host "  - Account is not locked or disabled"
+        return $false
+    }
+}
+
 function Get-SQLServerInstances {
     try {
         $instances = @()
@@ -836,7 +954,9 @@ function New-ScheduledBackupTask {
         [string]$DatabaseName,
         [string]$ServerInstance,
         [string]$BackupPath,
-        [hashtable]$Schedule
+        [hashtable]$Schedule,
+        [Parameter(Mandatory=$true)]
+        [System.Management.Automation.PSCredential]$Credential
     )
     
     $backupScript = Join-Path $script:Config.ScriptPath "Invoke-SQLBackup.ps1"
@@ -848,15 +968,15 @@ function New-ScheduledBackupTask {
     $fullTrigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $Schedule.FullBackupDay -At $Schedule.FullBackupTime
     
     $fullSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
-    $fullPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    
+
     # Remove existing task if present
     $existingTask = Get-ScheduledTask -TaskName $fullTaskName -ErrorAction SilentlyContinue
     if ($existingTask) {
         Unregister-ScheduledTask -TaskName $fullTaskName -Confirm:$false
     }
-    
-    Register-ScheduledTask -TaskName $fullTaskName -Action $fullAction -Trigger $fullTrigger -Settings $fullSettings -Principal $fullPrincipal -Description "Weekly full backup for $DatabaseName with compression" | Out-Null
+
+    # Register task with provided credentials
+    Register-ScheduledTask -TaskName $fullTaskName -Action $fullAction -Trigger $fullTrigger -Settings $fullSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Weekly full backup for $DatabaseName with compression" | Out-Null
     
     # Create Differential Backup Task (Every 4 hours)
     $diffTaskName = "SQLBackup-$DatabaseName-Diff"
@@ -873,14 +993,14 @@ function New-ScheduledBackupTask {
     )
     
     $diffSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
-    $diffPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    
+
     $existingDiffTask = Get-ScheduledTask -TaskName $diffTaskName -ErrorAction SilentlyContinue
     if ($existingDiffTask) {
         Unregister-ScheduledTask -TaskName $diffTaskName -Confirm:$false
     }
-    
-    $task = Register-ScheduledTask -TaskName $diffTaskName -Action $diffAction -Trigger $diffTriggers[0] -Settings $diffSettings -Principal $diffPrincipal -Description "Differential backup every 4 hours for $DatabaseName"
+
+    # Register task with provided credentials
+    $task = Register-ScheduledTask -TaskName $diffTaskName -Action $diffAction -Trigger $diffTriggers[0] -Settings $diffSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Differential backup every 4 hours for $DatabaseName"
     
     # Add additional triggers
     $taskObj = Get-ScheduledTask -TaskName $diffTaskName
@@ -896,14 +1016,14 @@ function New-ScheduledBackupTask {
     
     $cleanupTrigger = New-ScheduledTaskTrigger -Daily -At "03:00"
     $cleanupSettings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew
-    $cleanupPrincipal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
-    
+
     $existingCleanupTask = Get-ScheduledTask -TaskName $cleanupTaskName -ErrorAction SilentlyContinue
     if ($existingCleanupTask) {
         Unregister-ScheduledTask -TaskName $cleanupTaskName -Confirm:$false
     }
-    
-    Register-ScheduledTask -TaskName $cleanupTaskName -Action $cleanupAction -Trigger $cleanupTrigger -Settings $cleanupSettings -Principal $cleanupPrincipal -Description "Daily cleanup of old backups for $DatabaseName (7-day retention)" | Out-Null
+
+    # Register task with provided credentials
+    Register-ScheduledTask -TaskName $cleanupTaskName -Action $cleanupAction -Trigger $cleanupTrigger -Settings $cleanupSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Daily cleanup of old backups for $DatabaseName (7-day retention)" | Out-Null
     
     return @{
         FullTask = $fullTaskName
@@ -1145,10 +1265,27 @@ function Install-BackupJob {
     $backupScript = New-BackupScript
     $cleanupScript = New-CleanupScript
     Write-Success "Scripts generated"
-    
+    Write-Host ""
+
+    # Get service credentials for scheduled tasks
+    $serviceCredential = Get-ServiceCredentials
+    if (-not $serviceCredential) {
+        Write-Error "Cannot create scheduled tasks without credentials"
+        return
+    }
+
+    # Validate credentials can access SQL Server
+    if (-not (Test-SQLCredentials -Credential $serviceCredential -ServerInstance $selectedInstance)) {
+        Write-Error "Credentials do not have sufficient SQL Server permissions"
+        Write-Info "Please ensure the account has sysadmin or dbcreator role"
+        return
+    }
+
+    Write-Host ""
+
     # Create scheduled tasks
     Write-Info "Creating scheduled tasks..."
-    $tasks = New-ScheduledBackupTask -DatabaseName $selectedDatabase -ServerInstance $selectedInstance -BackupPath $backupPath -Schedule $schedule
+    $tasks = New-ScheduledBackupTask -DatabaseName $selectedDatabase -ServerInstance $selectedInstance -BackupPath $backupPath -Schedule $schedule -Credential $serviceCredential
     Write-Success "Scheduled tasks created:"
     Write-Success "  • $($tasks.FullTask)"
     Write-Success "  • $($tasks.DiffTask)"
@@ -1168,6 +1305,7 @@ function Install-BackupJob {
         databaseName = $selectedDatabase
         serverInstance = $selectedInstance
         backupPath = $backupPath
+        serviceAccount = $serviceCredential.UserName
         schedules = @{
             fullBackup = @{
                 frequency = "Weekly"
