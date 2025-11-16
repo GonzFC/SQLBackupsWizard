@@ -203,12 +203,18 @@ function Get-SQLServerInstances {
         }
 
         # Remove duplicates and ensure we return an array
-        $uniqueInstances = @($instances | Select-Object -Unique)
-        return ,$uniqueInstances
+        $uniqueInstances = $instances | Select-Object -Unique
+
+        # Force return as array to prevent unwrapping
+        if ($uniqueInstances -is [array]) {
+            return $uniqueInstances
+        } else {
+            return @($uniqueInstances)
+        }
     }
     catch {
         Write-Warning "Error detecting SQL Server instances: $_"
-        return ,@("localhost")
+        return @("localhost")
     }
 }
 
@@ -813,7 +819,7 @@ function Install-BackupJob {
     # Get SQL Server instance
     Write-Header "SQL SERVER INSTANCE SELECTION"
 
-    $instances = @(Get-SQLServerInstances)
+    [array]$instances = Get-SQLServerInstances
 
     if (-not $instances -or $instances.Count -eq 0) {
         Write-Error "No SQL Server instances detected. Please ensure SQL Server is installed."
@@ -822,12 +828,15 @@ function Install-BackupJob {
 
     Write-Info "Found $($instances.Count) SQL Server instance(s)"
 
+    # Handle single instance
     if ($instances.Count -eq 1) {
-        $selectedInstance = $instances[0].ToString()
-        Write-Info "Detected instance: '$selectedInstance'"
+        # Get the first element and ensure it's a string
+        $selectedInstance = [string]$instances[0]
+        Write-Info "Auto-selected instance: '$selectedInstance'"
     }
     else {
-        Write-Info "Detected instances:"
+        # Multiple instances - let user choose
+        Write-Info "Available instances:"
         for ($i = 0; $i -lt $instances.Count; $i++) {
             Write-Host "  [$($i + 1)] $($instances[$i])"
         }
@@ -835,10 +844,11 @@ function Install-BackupJob {
 
         do {
             $selection = Read-Host "Select instance number (1-$($instances.Count))"
-            $selectionInt = [int]$selection
+            $selectionInt = 0
+            [void][int]::TryParse($selection, [ref]$selectionInt)
         } while ($selectionInt -lt 1 -or $selectionInt -gt $instances.Count)
 
-        $selectedInstance = $instances[$selectionInt - 1].ToString()
+        $selectedInstance = [string]$instances[$selectionInt - 1]
     }
 
     # Validate instance name
@@ -847,7 +857,7 @@ function Install-BackupJob {
         return
     }
 
-    Write-Success "Selected instance: '$selectedInstance'"
+    Write-Success "Using instance: '$selectedInstance'"
     Write-Host ""
     
     # Test connection
