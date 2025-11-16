@@ -314,15 +314,32 @@ function Test-SQLCredentials {
         [string]$ServerInstance
     )
 
-    Write-Info "Validating credentials can access SQL Server..."
-
     try {
+        # Check if this is a Windows account
+        $isWindowsAccount = $Credential.UserName -match '\\|@'
+
+        if ($isWindowsAccount) {
+            Write-Info "Detected Windows domain account: $($Credential.UserName)"
+            Write-Warning "Cannot validate Windows credentials from current PowerShell session"
+            Write-Info "The scheduled tasks will authenticate with these credentials when they run"
+            Write-Host ""
+            Write-Info "To verify manually, you can:"
+            Write-Host "  1. Check that the account exists in Active Directory"
+            Write-Host "  2. Verify the account has SQL Server login (see GRANT-BACKUP-PERMISSIONS.sql)"
+            Write-Host "  3. Run a test backup manually after creating tasks"
+            Write-Host ""
+            return $false  # Cannot validate, but allow user to continue
+        }
+
+        # SQL authentication account - we can try to validate
+        Write-Info "Validating SQL authentication credentials..."
+
         # Convert SecureString password to plain text for SQL connection
         $BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Credential.Password)
         $plainPassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
         [System.Runtime.InteropServices.Marshal]::ZeroFreeBSTR($BSTR)
 
-        # Build connection string
+        # Build connection string for SQL auth
         $connectionString = "Server=$ServerInstance;Integrated Security=false;User ID=$($Credential.UserName);Password=$plainPassword;TrustServerCertificate=true;Encrypt=true;"
 
         # Test connection
@@ -354,21 +371,17 @@ function Test-SQLCredentials {
             return $true
         } elseif ($hasDbCreator) {
             Write-Success "Credentials validated - user has dbcreator role"
-            Write-Warning "User has dbcreator but not sysadmin - backups should work but verify permissions"
             return $true
         } else {
-            Write-Error "User lacks sufficient permissions (needs sysadmin or dbcreator role)"
-            Write-Info "Current roles: sysadmin=$hasSysAdmin, dbcreator=$hasDbCreator"
+            Write-Warning "User lacks sysadmin or dbcreator roles"
+            Write-Info "The account may still work if it has db_backupoperator role on specific databases"
             return $false
         }
     }
     catch {
-        Write-Error "Failed to validate credentials: $($_.Exception.Message)"
-        Write-Info "Please verify:"
-        Write-Host "  - Username and password are correct"
-        Write-Host "  - Account has SQL Server login"
-        Write-Host "  - SQL Server allows SQL authentication or Windows authentication"
-        Write-Host "  - Account is not locked or disabled"
+        Write-Warning "Credential validation failed: $($_.Exception.Message)"
+        Write-Info "This may be normal for Windows accounts"
+        Write-Host ""
         return $false
     }
 }
@@ -1274,11 +1287,32 @@ function Install-BackupJob {
         return
     }
 
-    # Validate credentials can access SQL Server
-    if (-not (Test-SQLCredentials -Credential $serviceCredential -ServerInstance $selectedInstance)) {
-        Write-Error "Credentials do not have sufficient SQL Server permissions"
-        Write-Info "Please ensure the account has sysadmin or dbcreator role"
-        return
+    # Validate credentials can access SQL Server (optional for Windows accounts)
+    Write-Host ""
+    Write-Info "Attempting to validate credentials..."
+    Write-Warning "Note: Validation may fail for Windows accounts due to authentication context"
+    Write-Host ""
+
+    $validationResult = Test-SQLCredentials -Credential $serviceCredential -ServerInstance $selectedInstance
+
+    if (-not $validationResult) {
+        Write-Warning "Credential validation failed or could not be completed"
+        Write-Host ""
+        Write-Info "This is common for Windows domain accounts."
+        Write-Info "The wizard will create scheduled tasks with the provided credentials."
+        Write-Info "If the credentials are correct, the tasks will work when they run."
+        Write-Host ""
+
+        $continue = Read-Host "Do you want to continue and create tasks anyway? (Y/N)"
+        if ($continue -notmatch '^[Yy]') {
+            Write-Warning "Task creation cancelled by user"
+            return
+        }
+        Write-Host ""
+        Write-Info "Proceeding with task creation..."
+    }
+    else {
+        Write-Success "Credentials validated successfully"
     }
 
     Write-Host ""
