@@ -15,8 +15,8 @@
     - Multi-database support
 
 .EXAMPLE
-    # Run directly from GitHub (once published)
-    iwr -useb https://yourgithub.com/sql-backup-wizard | iex
+    # Run directly from GitHub
+    iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 
 .EXAMPLE
     # Run locally

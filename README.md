@@ -7,12 +7,12 @@ Inspired by Chris Titus Tech's Windows Utility, this wizard provides a simple, i
 ## Quick Start
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/GonzFC/sql-backup-wizard/main/Install-SQLBackupWizard.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 ```
 
 **Alternative method:**
 ```powershell
-irm https://raw.githubusercontent.com/GonzFC/sql-backup-wizard/main/Install-SQLBackupWizard.ps1 | iex
+irm https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 ```
 
 ## Features
@@ -70,14 +70,14 @@ Old FULL + old DIFFs deleted (chain-aware)
 ### Install Mode (Default)
 Configure a new backup job interactively:
 ```powershell
-iwr -useb https://your-url/Install-SQLBackupWizard.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 ```
 
 ### Status Mode
 View all configured backup jobs:
 ```powershell
 # Download first
-iwr -useb https://your-url/Install-SQLBackupWizard.ps1 -OutFile wizard.ps1
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 -OutFile wizard.ps1
 
 # Run status check
 .\wizard.ps1 -Action Status

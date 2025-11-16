@@ -108,7 +108,7 @@ Windows Task Scheduler:
 #### 1. Installation (First Run)
 ```powershell
 # User runs from GitHub
-iwr -useb https://yourgithub.com/sql-backup-wizard | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 
 # Wizard:
 # - Checks prerequisites
@@ -122,11 +122,11 @@ iwr -useb https://yourgithub.com/sql-backup-wizard | iex
 #### 2. Job Management (Subsequent Runs)
 ```powershell
 # Download and run with parameter
-iwr -useb https://yourgithub.com/sql-backup-wizard | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 # Then select: Manage
 
 # Or save locally first:
-iwr -useb https://yourgithub.com/sql-backup-wizard -OutFile wizard.ps1
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 -OutFile wizard.ps1
 .\wizard.ps1 -Action Manage
 ```
 
@@ -252,7 +252,7 @@ C:\Program Files\Microsoft SQL Server\MSSQL##.{INSTANCE}\MSSQL\Backup\
 
 ### For GitHub Publication
 
-1. **Create repository:** `your-username/sql-backup-wizard`
+1. **Create repository:** `GonzFC/SQLBackupsWizard`
 
 2. **Upload file:** `Install-SQLBackupWizard.ps1`
 
@@ -265,12 +265,12 @@ One-command installation of automated SQL Server backups.
 ## Quick Start
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/your-username/sql-backup-wizard/main/Install-SQLBackupWizard.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 ```
 
 Or shorter URL (if you set up GitHub Pages):
 ```powershell
-iwr -useb https://your-username.github.io/sql-backup-wizard | iex
+iwr -useb https://GonzFC.github.io/SQLBackupsWizard | iex
 ```
 
 ## Features
@@ -359,7 +359,7 @@ iwr -useb <github-url> -OutFile C:\Temp\wizard.ps1
 
 ```powershell
 # Run from GitHub
-iwr -useb https://yourgithub.com/wizard | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 
 # Wizard prompts:
 # → Select SQL Server instance: (local)
@@ -379,7 +379,7 @@ iwr -useb https://yourgithub.com/wizard | iex
 
 ```powershell
 # Run wizard again
-iwr -useb https://yourgithub.com/wizard | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 | iex
 
 # Select different database: TestDB
 # Configure and create
@@ -389,7 +389,7 @@ iwr -useb https://yourgithub.com/wizard | iex
 
 ```powershell
 # Save script locally
-iwr -useb https://yourgithub.com/wizard -OutFile wizard.ps1
+iwr -useb https://raw.githubusercontent.com/GonzFC/SQLBackupsWizard/main/Install-SQLBackupWizard.ps1 -OutFile wizard.ps1
 
 # Check status
 .\wizard.ps1 -Action Status
