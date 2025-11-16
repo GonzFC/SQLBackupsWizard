@@ -150,31 +150,64 @@ function Test-SQLServerModule {
 function Get-SQLServerInstances {
     try {
         $instances = @()
-        
-        # Get local instances
-        $reg = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Default')
-        $regKey = $reg.OpenSubKey("SOFTWARE\Microsoft\Microsoft SQL Server")
-        
-        if ($regKey) {
-            $instanceNames = $regKey.GetValue("InstalledInstances")
-            foreach ($instance in $instanceNames) {
-                if ($instance -eq "MSSQLSERVER") {
-                    $instances += "(local)"
-                }
-                else {
-                    $instances += "(local)\$instance"
+
+        # Method 1: Check registry for installed instances
+        try {
+            $reg = [Microsoft.Win32.RegistryKey]::OpenBaseKey('LocalMachine', 'Default')
+            $regKey = $reg.OpenSubKey("SOFTWARE\Microsoft\Microsoft SQL Server")
+
+            if ($regKey) {
+                $instanceNames = $regKey.GetValue("InstalledInstances")
+                if ($instanceNames) {
+                    foreach ($instance in $instanceNames) {
+                        if ($instance -eq "MSSQLSERVER") {
+                            $instances += "localhost"
+                        }
+                        else {
+                            $instances += "localhost\$instance"
+                        }
+                    }
                 }
             }
         }
-        
-        if ($instances.Count -eq 0) {
-            $instances += "(local)"
+        catch {
+            # Registry method failed, continue to next method
         }
-        
-        return $instances
+
+        # Method 2: Check for running SQL Server services
+        if ($instances.Count -eq 0) {
+            try {
+                $sqlServices = Get-Service | Where-Object {
+                    $_.Name -match '^MSSQL\$' -or $_.Name -eq 'MSSQLSERVER'
+                } | Where-Object { $_.Status -eq 'Running' }
+
+                foreach ($service in $sqlServices) {
+                    if ($service.Name -eq 'MSSQLSERVER') {
+                        $instances += "localhost"
+                    }
+                    else {
+                        $instanceName = $service.Name -replace '^MSSQL\$', ''
+                        $instances += "localhost\$instanceName"
+                    }
+                }
+            }
+            catch {
+                # Service method failed
+            }
+        }
+
+        # Method 3: Default fallback
+        if ($instances.Count -eq 0) {
+            Write-Warning "No SQL Server instances detected via registry or services. Using default 'localhost'."
+            $instances += "localhost"
+        }
+
+        # Remove duplicates and return
+        return $instances | Select-Object -Unique
     }
     catch {
-        return @("(local)")
+        Write-Warning "Error detecting SQL Server instances: $_"
+        return @("localhost")
     }
 }
 
@@ -780,10 +813,15 @@ function Install-BackupJob {
     Write-Header "SQL SERVER INSTANCE SELECTION"
     
     $instances = Get-SQLServerInstances
-    
+
+    if (-not $instances -or $instances.Count -eq 0) {
+        Write-Error "No SQL Server instances detected. Please ensure SQL Server is installed."
+        return
+    }
+
     if ($instances.Count -eq 1) {
         $selectedInstance = $instances[0]
-        Write-Info "Detected instance: $selectedInstance"
+        Write-Info "Detected instance: '$selectedInstance'"
     }
     else {
         Write-Info "Detected instances:"
@@ -791,28 +829,43 @@ function Install-BackupJob {
             Write-Host "  [$($i + 1)] $($instances[$i])"
         }
         Write-Host ""
-        
+
         do {
             $selection = Read-Host "Select instance number (1-$($instances.Count))"
             $selectionInt = [int]$selection
         } while ($selectionInt -lt 1 -or $selectionInt -gt $instances.Count)
-        
+
         $selectedInstance = $instances[$selectionInt - 1]
     }
-    
-    Write-Success "Selected instance: $selectedInstance"
+
+    # Validate instance name
+    if ([string]::IsNullOrWhiteSpace($selectedInstance)) {
+        Write-Error "Instance name is empty or invalid"
+        return
+    }
+
+    Write-Success "Selected instance: '$selectedInstance'"
     Write-Host ""
     
     # Test connection
-    Write-Info "Testing connection to $selectedInstance..."
+    Write-Info "Testing connection to '$selectedInstance'..."
     try {
         $testQuery = "SELECT @@VERSION AS Version"
         $version = Invoke-Sqlcmd -ServerInstance $selectedInstance -Query $testQuery -ErrorAction Stop
         Write-Success "Connection successful"
+        Write-Info "SQL Server version: $($version.Version.Split("`n")[0])"
         Write-Host ""
     }
     catch {
-        Write-Error "Failed to connect to $selectedInstance : $_"
+        Write-Error "Failed to connect to '$selectedInstance'"
+        Write-Warning "Error details: $($_.Exception.Message)"
+        Write-Host ""
+        Write-Info "Troubleshooting tips:"
+        Write-Host "  - Ensure SQL Server service is running"
+        Write-Host "  - Check Windows Firewall settings"
+        Write-Host "  - Verify SQL Server Browser service is running (for named instances)"
+        Write-Host "  - Try using: localhost or .\INSTANCENAME or computername\INSTANCENAME"
+        Write-Host ""
         return
     }
     
