@@ -202,12 +202,13 @@ function Get-SQLServerInstances {
             $instances += "localhost"
         }
 
-        # Remove duplicates and return
-        return $instances | Select-Object -Unique
+        # Remove duplicates and ensure we return an array
+        $uniqueInstances = @($instances | Select-Object -Unique)
+        return ,$uniqueInstances
     }
     catch {
         Write-Warning "Error detecting SQL Server instances: $_"
-        return @("localhost")
+        return ,@("localhost")
     }
 }
 
@@ -811,16 +812,18 @@ function Install-BackupJob {
     
     # Get SQL Server instance
     Write-Header "SQL SERVER INSTANCE SELECTION"
-    
-    $instances = Get-SQLServerInstances
+
+    $instances = @(Get-SQLServerInstances)
 
     if (-not $instances -or $instances.Count -eq 0) {
         Write-Error "No SQL Server instances detected. Please ensure SQL Server is installed."
         return
     }
 
+    Write-Info "Found $($instances.Count) SQL Server instance(s)"
+
     if ($instances.Count -eq 1) {
-        $selectedInstance = $instances[0]
+        $selectedInstance = $instances[0].ToString()
         Write-Info "Detected instance: '$selectedInstance'"
     }
     else {
@@ -835,7 +838,7 @@ function Install-BackupJob {
             $selectionInt = [int]$selection
         } while ($selectionInt -lt 1 -or $selectionInt -gt $instances.Count)
 
-        $selectedInstance = $instances[$selectionInt - 1]
+        $selectedInstance = $instances[$selectionInt - 1].ToString()
     }
 
     # Validate instance name
