@@ -230,7 +230,7 @@ WHERE name NOT IN ('master', 'tempdb', 'model', 'msdb')
 ORDER BY name
 "@
         
-        $databases = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query -ErrorAction Stop
+        $databases = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query -TrustServerCertificate -ErrorAction Stop
         return $databases.name
     }
     catch {
@@ -253,7 +253,7 @@ EXEC master.dbo.xp_instance_regread
 SELECT @BackupPath AS BackupPath
 "@
         
-        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query -ErrorAction Stop
+        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query -TrustServerCertificate -ErrorAction Stop
         return $result.BackupPath
     }
     catch {
@@ -409,7 +409,7 @@ EXEC master.dbo.xp_instance_regread
     @BackupPath OUTPUT
 SELECT @BackupPath AS BackupPath
 "@
-        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query
+        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query -TrustServerCertificate
         $BackupPath = $result.BackupPath
     }
     
@@ -430,7 +430,7 @@ FROM msdb.dbo.backupset
 WHERE database_name = '$DatabaseName'
   AND type = 'D'
 "@
-        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $checkQuery
+        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $checkQuery -TrustServerCertificate
         
         if ($result.BackupCount -eq 0) {
             Write-BackupLog "No full backup found! Cannot perform differential backup." "ERROR"
@@ -456,7 +456,7 @@ WITH
     $startTime = Get-Date
     Write-BackupLog "Starting backup..." "INFO"
     
-    Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $backupQuery -QueryTimeout 3600 -Verbose 4>&1 | 
+    Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $backupQuery -TrustServerCertificate -QueryTimeout 3600 -Verbose 4>&1 | 
         ForEach-Object { Write-BackupLog $_.Message "INFO" }
     
     $endTime = Get-Date
@@ -472,7 +472,7 @@ WITH
         # Verify backup
         Write-BackupLog "Verifying backup integrity..." "INFO"
         $verifyQuery = "RESTORE VERIFYONLY FROM DISK = N'$backupFile' WITH CHECKSUM"
-        Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $verifyQuery -QueryTimeout 600
+        Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $verifyQuery -TrustServerCertificate -QueryTimeout 600
         Write-BackupLog "Backup verification passed!" "SUCCESS"
         
         exit 0
@@ -549,7 +549,7 @@ EXEC master.dbo.xp_instance_regread
     @BackupPath OUTPUT
 SELECT @BackupPath AS BackupPath
 "@
-        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query
+        $result = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $query -TrustServerCertificate
         $BackupPath = $result.BackupPath
     }
     
@@ -590,7 +590,7 @@ FROM BackupChain
 ORDER BY backup_finish_date DESC
 "@
     
-    $backupHistory = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $historyQuery
+    $backupHistory = Invoke-Sqlcmd -ServerInstance $ServerInstance -Query $historyQuery -TrustServerCertificate
     
     if ($backupHistory.Count -eq 0) {
         Write-CleanupLog "No backup history found for $DatabaseName" "WARNING"
@@ -864,7 +864,7 @@ function Install-BackupJob {
     Write-Info "Testing connection to '$selectedInstance'..."
     try {
         $testQuery = "SELECT @@VERSION AS Version"
-        $version = Invoke-Sqlcmd -ServerInstance $selectedInstance -Query $testQuery -ErrorAction Stop
+        $version = Invoke-Sqlcmd -ServerInstance $selectedInstance -Query $testQuery -TrustServerCertificate -ErrorAction Stop
         Write-Success "Connection successful"
         Write-Info "SQL Server version: $($version.Version.Split("`n")[0])"
         Write-Host ""
