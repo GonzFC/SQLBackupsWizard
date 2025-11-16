@@ -255,6 +255,20 @@ function Invoke-HealthCheck {
     }
 }
 
+function Test-WindowsAccount {
+    param([string]$Username)
+
+    try {
+        # Try to resolve the account using .NET
+        $objUser = New-Object System.Security.Principal.NTAccount($Username)
+        $strSID = $objUser.Translate([System.Security.Principal.SecurityIdentifier])
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
 function Get-ServiceCredentials {
     Write-Header "SERVICE ACCOUNT CREDENTIALS"
     Write-Host ""
@@ -299,7 +313,31 @@ function Get-ServiceCredentials {
             }
         }
 
-        return $credential
+        # Verify the account exists in Windows
+        Write-Info "Verifying account exists in Windows/Active Directory..."
+        if (Test-WindowsAccount -Username $username) {
+            Write-Success "Account verified: $username"
+            return $credential
+        }
+        else {
+            Write-Warning "Cannot find account: $username"
+            Write-Host ""
+            Write-Info "Common issues:"
+            Write-Host "  - Account doesn't exist in Active Directory"
+            Write-Host "  - Domain name is incorrect"
+            Write-Host "  - Try format: DOMAIN\username (not firstname.lastname)"
+            Write-Host "  - Try format: username@domain.com"
+            Write-Host "  - Ensure domain controller is reachable"
+            Write-Host ""
+
+            if ($attempt -lt $maxAttempts) {
+                Write-Info "Please try again ($attempt/$maxAttempts)"
+                continue
+            } else {
+                Write-Error "Failed to verify account after $maxAttempts attempts"
+                return $null
+            }
+        }
     }
 
     return $null
@@ -989,7 +1027,14 @@ function New-ScheduledBackupTask {
     }
 
     # Register task with provided credentials
-    Register-ScheduledTask -TaskName $fullTaskName -Action $fullAction -Trigger $fullTrigger -Settings $fullSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Weekly full backup for $DatabaseName with compression" | Out-Null
+    try {
+        Register-ScheduledTask -TaskName $fullTaskName -Action $fullAction -Trigger $fullTrigger -Settings $fullSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Weekly full backup for $DatabaseName with compression" -ErrorAction Stop | Out-Null
+        Write-Verbose "Full backup task created successfully"
+    }
+    catch {
+        Write-Error "Failed to create full backup task: $_"
+        throw "Task creation failed - verify account exists and credentials are correct"
+    }
     
     # Create Differential Backup Task (Every 4 hours)
     $diffTaskName = "SQLBackup-$DatabaseName-Diff"
@@ -1013,7 +1058,14 @@ function New-ScheduledBackupTask {
     }
 
     # Register task with provided credentials
-    $task = Register-ScheduledTask -TaskName $diffTaskName -Action $diffAction -Trigger $diffTriggers[0] -Settings $diffSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Differential backup every 4 hours for $DatabaseName"
+    try {
+        $task = Register-ScheduledTask -TaskName $diffTaskName -Action $diffAction -Trigger $diffTriggers[0] -Settings $diffSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Differential backup every 4 hours for $DatabaseName" -ErrorAction Stop
+        Write-Verbose "Differential backup task created successfully"
+    }
+    catch {
+        Write-Error "Failed to create differential backup task: $_"
+        throw "Task creation failed - verify account exists and credentials are correct"
+    }
     
     # Add additional triggers
     $taskObj = Get-ScheduledTask -TaskName $diffTaskName
@@ -1036,7 +1088,14 @@ function New-ScheduledBackupTask {
     }
 
     # Register task with provided credentials
-    Register-ScheduledTask -TaskName $cleanupTaskName -Action $cleanupAction -Trigger $cleanupTrigger -Settings $cleanupSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Daily cleanup of old backups for $DatabaseName (7-day retention)" | Out-Null
+    try {
+        Register-ScheduledTask -TaskName $cleanupTaskName -Action $cleanupAction -Trigger $cleanupTrigger -Settings $cleanupSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Daily cleanup of old backups for $DatabaseName (7-day retention)" -ErrorAction Stop | Out-Null
+        Write-Verbose "Cleanup task created successfully"
+    }
+    catch {
+        Write-Error "Failed to create cleanup task: $_"
+        throw "Task creation failed - verify account exists and credentials are correct"
+    }
     
     return @{
         FullTask = $fullTaskName
