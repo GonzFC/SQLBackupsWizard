@@ -41,11 +41,12 @@ param(
 # ============================================================================
 
 $script:Config = @{
-    Version = "1.0.0"
+    Version = "1.1.0"
     BasePath = "C:\ProgramData\SQLBackupWizard"
     ConfigFile = "C:\ProgramData\SQLBackupWizard\config\jobs.json"
     LogPath = "C:\ProgramData\SQLBackupWizard\logs"
     ScriptPath = "C:\ProgramData\SQLBackupWizard\scripts"
+    BackupScriptVersion = "1.1.0"  # Track generated script version
 }
 
 # ============================================================================
@@ -147,6 +148,110 @@ function Test-SQLServerModule {
     else {
         Import-Module SqlServer -ErrorAction SilentlyContinue
         return $true
+    }
+}
+
+function Invoke-HealthCheck {
+    Write-Header "SYSTEM HEALTH CHECK"
+
+    $issues = @()
+    $fixes = @()
+
+    # Check 1: SqlServer module scope
+    Write-Info "Checking SqlServer module installation..."
+    $modulesAllUsers = Get-Module -ListAvailable -Name SqlServer | Where-Object { $_.Path -like "*Program Files*" }
+    $modulesCurrentUser = Get-Module -ListAvailable -Name SqlServer | Where-Object { $_.Path -like "*Documents*" -or $_.Path -like "*Users*" }
+
+    if ($modulesCurrentUser -and -not $modulesAllUsers) {
+        $issues += "SqlServer module installed for CurrentUser only (scheduled tasks need AllUsers)"
+        Write-Warning "SqlServer module found in user scope - scheduled tasks won't work"
+        Write-Info "Fixing: Reinstalling module system-wide..."
+
+        try {
+            Uninstall-Module -Name SqlServer -Force -ErrorAction SilentlyContinue
+            Install-Module -Name SqlServer -Force -AllowClobber -Scope AllUsers -ErrorAction Stop
+            Import-Module SqlServer -ErrorAction Stop
+            $fixes += "Reinstalled SqlServer module system-wide"
+            Write-Success "SqlServer module reinstalled successfully (system-wide)"
+        }
+        catch {
+            Write-Error "Failed to reinstall module: $_"
+        }
+    }
+    elseif ($modulesAllUsers) {
+        Write-Success "SqlServer module properly installed (system-wide)"
+    }
+
+    # Check 2: Outdated backup scripts
+    Write-Info "Checking for outdated backup scripts..."
+    $backupScriptPath = Join-Path $script:Config.ScriptPath "Invoke-SQLBackup.ps1"
+
+    if (Test-Path $backupScriptPath) {
+        $scriptContent = Get-Content $backupScriptPath -Raw
+        if ($scriptContent -match 'SCRIPT_VERSION = "([^"]+)"') {
+            $installedVersion = $matches[1]
+            if ($installedVersion -ne $script:Config.BackupScriptVersion) {
+                $issues += "Backup scripts are outdated (v$installedVersion, current: v$($script:Config.BackupScriptVersion))"
+                Write-Warning "Backup script is outdated: v$installedVersion (current: v$($script:Config.BackupScriptVersion))"
+                Write-Info "Fixing: Regenerating backup scripts..."
+
+                try {
+                    New-BackupScript
+                    New-CleanupScript
+                    $fixes += "Regenerated backup scripts to v$($script:Config.BackupScriptVersion)"
+                    Write-Success "Backup scripts updated successfully"
+                }
+                catch {
+                    Write-Error "Failed to regenerate scripts: $_"
+                }
+            }
+            else {
+                Write-Success "Backup scripts are up to date (v$installedVersion)"
+            }
+        }
+        else {
+            $issues += "Backup scripts missing version info (very old version)"
+            Write-Warning "Backup script has no version info - regenerating..."
+
+            try {
+                New-BackupScript
+                New-CleanupScript
+                $fixes += "Regenerated unversioned backup scripts"
+                Write-Success "Backup scripts regenerated"
+            }
+            catch {
+                Write-Error "Failed to regenerate scripts: $_"
+            }
+        }
+    }
+
+    # Check 3: Job configuration version
+    if (Test-Path $script:Config.ConfigFile) {
+        Write-Info "Checking job configurations..."
+        try {
+            $config = Get-Content $script:Config.ConfigFile -Raw | ConvertFrom-Json
+
+            if (-not $config.version) {
+                $issues += "Job configuration missing version info"
+                Write-Warning "Job configuration has no version - migration may be needed"
+            }
+        }
+        catch {
+            Write-Warning "Could not read job configuration"
+        }
+    }
+
+    Write-Host ""
+    if ($fixes.Count -gt 0) {
+        Write-Header "FIXES APPLIED"
+        foreach ($fix in $fixes) {
+            Write-Success $fix
+        }
+        Write-Host ""
+    }
+    elseif ($issues.Count -eq 0) {
+        Write-Success "All health checks passed! System is up to date."
+        Write-Host ""
     }
 }
 
@@ -352,27 +457,35 @@ function Find-ExistingJob {
 # ============================================================================
 
 function New-BackupScript {
-    $scriptContent = @'
+    $scriptContent = @"
 #Requires -Version 5.1
+# SQL Server Backup Script
+# Generated by: SQL Server Backup Wizard v$($script:Config.Version)
+# Script Version: $($script:Config.BackupScriptVersion)
+# Generated on: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
+
 param(
-    [Parameter(Mandatory=$true)]
-    [string]$DatabaseName,
-    
-    [Parameter(Mandatory=$true)]
-    [string]$ServerInstance,
-    
-    [Parameter(Mandatory=$true)]
+    [Parameter(Mandatory=`$true)]
+    [string]`$DatabaseName,
+
+    [Parameter(Mandatory=`$true)]
+    [string]`$ServerInstance,
+
+    [Parameter(Mandatory=`$true)]
     [ValidateSet("Full", "Differential")]
-    [string]$BackupType,
-    
-    [Parameter(Mandatory=$false)]
-    [string]$BackupPath,
-    
-    [Parameter(Mandatory=$false)]
-    [int]$RetentionDays = 7
+    [string]`$BackupType,
+
+    [Parameter(Mandatory=`$false)]
+    [string]`$BackupPath,
+
+    [Parameter(Mandatory=`$false)]
+    [int]`$RetentionDays = 7
 )
 
-$ErrorActionPreference = "Stop"
+`$ErrorActionPreference = "Stop"
+`$SCRIPT_VERSION = "$($script:Config.BackupScriptVersion)"
+"@
+    $scriptContent += @'
 
 function Write-BackupLog {
     param([string]$Message, [string]$Level = "INFO")
@@ -1080,6 +1193,8 @@ function Install-BackupJob {
         verification = $true
         created = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
         lastModified = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+        wizardVersion = $script:Config.Version
+        scriptVersion = $script:Config.BackupScriptVersion
         enabled = $true
     }
     
@@ -1288,7 +1403,10 @@ function Main {
         Write-Info "Right-click PowerShell and select 'Run as Administrator'"
         exit 1
     }
-    
+
+    # Run health check on every execution (idempotency)
+    Invoke-HealthCheck
+
     switch ($Action) {
         "Install" {
             Install-BackupJob
