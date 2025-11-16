@@ -7,12 +7,12 @@ Inspired by Chris Titus Tech's Windows Utility, this wizard provides a simple, i
 ## Quick Start
 
 ```powershell
-iwr -useb https://raw.githubusercontent.com/YOUR-USERNAME/sql-backup-wizard/main/Install-SQLBackupWizard.ps1 | iex
+iwr -useb https://raw.githubusercontent.com/GonzFC/sql-backup-wizard/main/Install-SQLBackupWizard.ps1 | iex
 ```
 
 **Alternative method:**
 ```powershell
-irm https://raw.githubusercontent.com/YOUR-USERNAME/sql-backup-wizard/main/Install-SQLBackupWizard.ps1 | iex
+irm https://raw.githubusercontent.com/GonzFC/sql-backup-wizard/main/Install-SQLBackupWizard.ps1 | iex
 ```
 
 ## Features
@@ -310,7 +310,7 @@ Inspired by:
 ## Author
 
 **Your Name**  
-GitHub: [@your-username](https://github.com/your-username)
+GitHub: [@GonzFC](https://github.com/GonzFC)
 
 ---
 
