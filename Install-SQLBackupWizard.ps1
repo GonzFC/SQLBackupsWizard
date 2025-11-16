@@ -128,16 +128,19 @@ function Test-Administrator {
 function Test-SQLServerModule {
     if (-not (Get-Module -ListAvailable -Name SqlServer)) {
         Write-Warning "SqlServer PowerShell module not found."
-        Write-Info "Installing SqlServer module..."
-        
+        Write-Info "Installing SqlServer module (system-wide for scheduled tasks)..."
+
         try {
-            Install-Module -Name SqlServer -Force -AllowClobber -Scope CurrentUser -ErrorAction Stop
+            # Install for AllUsers so SYSTEM account can access it
+            Install-Module -Name SqlServer -Force -AllowClobber -Scope AllUsers -ErrorAction Stop
             Import-Module SqlServer -ErrorAction Stop
-            Write-Success "SqlServer module installed successfully"
+            Write-Success "SqlServer module installed successfully (system-wide)"
             return $true
         }
         catch {
             Write-Error "Failed to install SqlServer module: $_"
+            Write-Warning "Please install manually with Administrator privileges:"
+            Write-Warning "  Install-Module -Name SqlServer -Force -Scope AllUsers"
             return $false
         }
     }
@@ -389,8 +392,13 @@ function Write-BackupLog {
 
 try {
     # Import SQL Server module
+    if (-not (Get-Module -ListAvailable -Name SqlServer)) {
+        Write-BackupLog "SqlServer module not found!" "ERROR"
+        Write-BackupLog "Install with: Install-Module -Name SqlServer -Force -Scope AllUsers" "ERROR"
+        exit 1
+    }
     Import-Module SqlServer -ErrorAction Stop
-    
+
     Write-BackupLog "========================================" "INFO"
     Write-BackupLog "SQL Server Backup - $BackupType" "INFO"
     Write-BackupLog "========================================" "INFO"
