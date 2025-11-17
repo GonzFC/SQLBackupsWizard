@@ -1057,22 +1057,36 @@ function New-ScheduledBackupTask {
         Unregister-ScheduledTask -TaskName $diffTaskName -Confirm:$false
     }
 
-    # Register task with provided credentials
+    # Register task with provided credentials and all triggers at once
     try {
-        $task = Register-ScheduledTask -TaskName $diffTaskName -Action $diffAction -Trigger $diffTriggers[0] -Settings $diffSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Differential backup every 4 hours for $DatabaseName" -ErrorAction Stop
-        Write-Verbose "Differential backup task created successfully"
+        # Create task object with all components
+        $taskPrincipal = New-ScheduledTaskPrincipal -UserId $Credential.UserName -LogonType Password -RunLevel Highest
+
+        # Register with first trigger, then update to add all triggers
+        $task = Register-ScheduledTask -TaskName $diffTaskName -Action $diffAction -Trigger $diffTriggers -Settings $diffSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Differential backup every 4 hours for $DatabaseName" -ErrorAction Stop
+
+        Write-Verbose "Differential backup task created successfully with all triggers"
     }
     catch {
-        Write-Error "Failed to create differential backup task: $_"
-        throw "Task creation failed - verify account exists and credentials are correct"
+        # If that fails, try creating with single trigger then updating
+        try {
+            $task = Register-ScheduledTask -TaskName $diffTaskName -Action $diffAction -Trigger $diffTriggers[0] -Settings $diffSettings -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -RunLevel Highest -Description "Differential backup every 4 hours for $DatabaseName" -ErrorAction Stop
+
+            # Add additional triggers with credentials
+            $taskObj = Get-ScheduledTask -TaskName $diffTaskName
+            for ($i = 1; $i -lt $diffTriggers.Count; $i++) {
+                $taskObj.Triggers += $diffTriggers[$i]
+            }
+            # Update task with credentials to avoid authentication error
+            Set-ScheduledTask -TaskName $diffTaskName -Trigger $taskObj.Triggers -User $Credential.UserName -Password $Credential.GetNetworkCredential().Password -ErrorAction Stop | Out-Null
+
+            Write-Verbose "Differential backup task created and updated with all triggers"
+        }
+        catch {
+            Write-Error "Failed to create differential backup task: $_"
+            throw "Task creation failed - verify account exists and credentials are correct"
+        }
     }
-    
-    # Add additional triggers
-    $taskObj = Get-ScheduledTask -TaskName $diffTaskName
-    for ($i = 1; $i -lt $diffTriggers.Count; $i++) {
-        $taskObj.Triggers += $diffTriggers[$i]
-    }
-    $taskObj | Set-ScheduledTask | Out-Null
     
     # Create Cleanup Task
     $cleanupScript = Join-Path $script:Config.ScriptPath "Remove-OldBackups.ps1"
