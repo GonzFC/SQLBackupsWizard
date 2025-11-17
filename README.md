@@ -316,6 +316,37 @@ GitHub: [@GonzFC](https://github.com/GonzFC)
 
 **⭐ If this wizard helps you, please star the repository!**
 
+---
+
+## 🎓 Learn to Build Your Own Tools with Claude Skills
+
+This project is also a **learning resource** for mastering Claude Skills!
+
+### Skills Mastery Course
+Want to learn how to build tools like this using Claude Skills?
+
+📚 **[Complete 12-Week Skills Mastery Course](SKILLS-MASTERY-COURSE.md)**
+
+**What you'll learn:**
+- How to create and use Claude Skills
+- AIQD methodology for better software design
+- Building professional PowerShell TUI wizards
+- Self-updating tool patterns
+- Hub-and-spoke architecture
+
+**What you'll build:**
+- VLABS Toolkit - A Swiss Army Knife for Windows Server
+- Multiple specialized tools using skills
+- Reusable skill templates
+
+**Resources:**
+- 📖 [Skills Mastery Course](SKILLS-MASTERY-COURSE.md) - Complete 12-week program
+- 🎯 [AIQD Methodology Skill](.claude/skills/aiqd-methodology/skill.md) - Foundation skill
+- 📋 [Skills Quick Reference](SKILLS-QUICK-REFERENCE.md) - Cheat sheet
+- 📊 [Session Status](SESSION-STATUS.md) - Current progress
+
+---
+
 ## Quick Links
 
 - [Installation](#quick-start)
@@ -323,3 +354,4 @@ GitHub: [@GonzFC](https://github.com/GonzFC)
 - [Configuration](#configuration)
 - [Troubleshooting](#troubleshooting)
 - [Restore Example](#restore-example)
+- [Skills Learning](SKILLS-MASTERY-COURSE.md)
